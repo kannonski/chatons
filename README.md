@@ -41,7 +41,11 @@ wit/chaton.wit         the plugin contract — the language-neutral source of tr
 host/                  the host (wasmtime + wasmtime-wasi + crossterm + kitty bridge)
 examples/hello/        the reference chaton — drives kitty + inline image
 examples/notepad/      a persistent scratch notepad — loads + saves
+examples/qr/           a self-contained app — type text → a live QR code (scan it)
 ```
+
+Chatons aren't only launchers: `qr` is a little app that just renders into the terminal (it
+even works without kitty's graphics protocol — it's unicode blocks).
 
 Run a different chaton by pointing the host at its component `.wasm`:
 
@@ -89,7 +93,7 @@ component-model tooling, not just Rust. (See `examples/` for the full versions w
 | v0.5 | `chaton-sdk` — the `Chaton` trait + `chaton!` macro, write a chaton without FFI *(done)* |
 | v0.6 | host→guest data — `read_file` (notepad loads its notes); the read direction *(done)* |
 | v0.7 | **WIT / Component Model** — the contract is `wit/chaton.wit`, rich types, chatons in any language *(done)* |
-| next | capture `kitty @ ls` into a chaton (a real project launcher) · a chaton in a second language |
+| next | a chaton in a second language (TinyGo / Zig) to exercise the polyglot promise |
 
 ## License
 

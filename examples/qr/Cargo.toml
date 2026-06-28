@@ -1,0 +1,13 @@
+[package]
+name = "qr-chaton"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[lib]
+name = "qr_chaton"
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.36"
+qrcode = { version = "0.14", default-features = false }
