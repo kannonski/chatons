@@ -43,6 +43,7 @@ examples/hello/        the reference chaton — drives kitty + inline image
 examples/notepad/      a persistent scratch notepad — loads + saves
 examples/qr/           a self-contained app — type text → a live QR code (scan it)
 examples/fend/         a unit-aware calculator (fend-core; currency via host-fetched rates)
+examples/act/          make terminal output interactive — act on URLs/files/hashes on screen
 ```
 
 Chatons aren't only launchers: `qr` is a little app that just renders into the terminal (it

@@ -28,6 +28,8 @@ interface host {
     read-file: func(path: string) -> option<string>;
     // live currency rates (USD base), fetched + cached by the host (chatons can't network)
     exchange-rates: func() -> list<rate>;
+    // the visible text of the pane the chaton was opened from — for content-aware chatons
+    source-text: func() -> string;
 }
 
 // a chaton: imports the host, exports its lifecycle. The chaton paints by calling host.render

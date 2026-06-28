@@ -1,0 +1,13 @@
+[package]
+name = "act-chaton"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[lib]
+name = "act_chaton"
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.36"
+regex = "1"

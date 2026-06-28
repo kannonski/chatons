@@ -92,6 +92,16 @@ impl chatons::plugin::host::Host for State {
         std::fs::read_to_string(&path).ok()
     }
 
+    // The visible text of the pane the chaton was opened from (recent:1 = the window active
+    // just before this overlay). Lets a chaton act on what's already on screen.
+    fn source_text(&mut self) -> String {
+        Command::new("kitty")
+            .args(["@", "get-text", "--match", "recent:1", "--extent", "screen"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
+    }
+
     // Live currency rates (USD base). The host has network; the sandboxed chaton doesn't.
     fn exchange_rates(&mut self) -> Vec<chatons::plugin::types::Rate> {
         fetch_rates()

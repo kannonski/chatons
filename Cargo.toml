@@ -4,4 +4,4 @@
 [workspace]
 resolver = "2"
 members = ["host"]
-exclude = ["examples/hello", "examples/notepad", "examples/qr", "examples/fend"]
+exclude = ["examples/hello", "examples/notepad", "examples/qr", "examples/fend", "examples/act"]
