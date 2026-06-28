@@ -1,0 +1,14 @@
+[package]
+name = "chatons"
+version = "0.1.0"
+edition = "2021"
+description = "A WASM plugin host for kitty — load chatons (plugins) written in any language."
+license = "MIT"
+
+[[bin]]
+name = "chatons"
+path = "src/main.rs"
+
+[dependencies]
+wasmtime = "27"
+anyhow = "1"

@@ -1,0 +1,7 @@
+# chatons — a WASM plugin host for kitty. "kittens, but in any language, sandboxed."
+# The host binary is the workspace; example plugins (which build for a wasm target) are
+# excluded so a plain `cargo build` doesn't try to link them for the native target.
+[workspace]
+resolver = "2"
+members = ["host"]
+exclude = ["examples/hello"]
