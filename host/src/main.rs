@@ -92,14 +92,35 @@ impl chatons::plugin::host::Host for State {
         std::fs::read_to_string(&path).ok()
     }
 
-    // The visible text of the pane the chaton was opened from (recent:1 = the window active
-    // just before this overlay). Lets a chaton act on what's already on screen.
+    // The visible text of the pane the chaton was opened from. Picks the most-recently-focused
+    // *real* window in the active tab — skipping chaton overlays — so it finds the pane behind
+    // the chaton chrome even when launched via the launcher.
     fn source_text(&mut self) -> String {
+        let m = source_window_match();
         Command::new("kitty")
-            .args(["@", "get-text", "--match", "recent:1", "--extent", "screen"])
+            .args(["@", "get-text", "--match", &m, "--extent", "screen"])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
             .unwrap_or_default()
+    }
+
+    // Names of installed chatons (the *.wasm in the home, minus the launcher itself).
+    fn list_chatons(&mut self) -> Vec<String> {
+        let mut names = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(chatons_home()) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.extension().and_then(|x| x.to_str()) == Some("wasm") {
+                    if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                        if stem != "launcher" {
+                            names.push(stem.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        names.sort();
+        names
     }
 
     // Live currency rates (USD base). The host has network; the sandboxed chaton doesn't.
@@ -284,6 +305,40 @@ fn run_named(target: &str) -> Result<()> {
         }
     }
     run_chaton(&path)
+}
+
+/// A kitty match for the source pane: the most-recently-focused window in the active tab that
+/// is NOT this process and NOT a chaton overlay (so it sees through launcher/act chrome).
+/// Falls back to `recent:1`.
+fn source_window_match() -> String {
+    let pick = || -> Option<u32> {
+        let out = Command::new("kitty").args(["@", "ls"]).output().ok()?.stdout;
+        let v: serde_json::Value = serde_json::from_slice(&out).ok()?;
+        let self_id = std::env::var("KITTY_WINDOW_ID").unwrap_or_default();
+        let mut best: Option<(f64, u32)> = None;
+        for ow in v.as_array().into_iter().flatten() {
+            if !ow["is_focused"].as_bool().unwrap_or(false) {
+                continue;
+            }
+            for tab in ow["tabs"].as_array().into_iter().flatten() {
+                if !tab["is_active"].as_bool().unwrap_or(false) {
+                    continue;
+                }
+                for w in tab["windows"].as_array().into_iter().flatten() {
+                    let id = w["id"].as_u64().unwrap_or(0);
+                    if id.to_string() == self_id || w["user_vars"]["chaton"].as_str().is_some() {
+                        continue; // skip self and any chaton overlay
+                    }
+                    let lf = w["last_focused_at"].as_f64().unwrap_or(0.0);
+                    if best.is_none_or(|(b, _)| lf > b) {
+                        best = Some((lf, id as u32));
+                    }
+                }
+            }
+        }
+        best.map(|(_, id)| id)
+    };
+    pick().map_or_else(|| "recent:1".to_string(), |id| format!("id:{id}"))
 }
 
 /// The id of another overlay tagged `chaton=<name>` in the focused OS window's active tab,

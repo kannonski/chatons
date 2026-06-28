@@ -44,6 +44,7 @@ examples/notepad/      a persistent scratch notepad — loads + saves
 examples/qr/           a self-contained app — type text → a live QR code (scan it)
 examples/fend/         a unit-aware calculator (fend-core; currency via host-fetched rates)
 examples/act/          make terminal output interactive — act on URLs/files/hashes on screen
+examples/launcher/     one key → pick any installed chaton (type to filter, enter to run)
 ```
 
 Chatons aren't only launchers: `qr` is a little app that just renders into the terminal (it
@@ -86,31 +87,32 @@ component-model tooling, not just Rust. (See `examples/` for the full versions w
 
 ## Managing chatons
 
-Installed chatons live in `~/.config/chatons/` (override with `$CHATONS_HOME`):
-
-```
-~/.config/chatons/
-  notepad.wasm
-  qr.wasm
-  chatons.toml      # what's enabled, and its key
-```
+Installed chatons live in `~/.config/chatons/` (override with `$CHATONS_HOME`) as `<name>.wasm`,
+with a small manifest:
 
 ```toml
-[notepad]
-key = "ctrl+shift+n"
+# chatons.toml
+[launcher]
+key = "ctrl+shift+space"   # one key for everything
+
+[notepad]                  # installed; no key → reached via the launcher
 [qr]
-key = "ctrl+shift+r"
-[hello]
-enabled = false     # installed, but off
+[fend]
+[act]
 ```
 
-- `chatons list` — what's installed, enabled, and its key
-- `chatons run <name>` — run one (this is what the keybindings call)
-- `chatons keys` — print the kitty `map` lines for enabled chatons
+**One keybinding for all of them**: the `launcher` chaton lists every installed `.wasm`, you
+type to filter and `enter` to run — so you don't burn a key per chaton (good keys run out fast,
+and they collide with kitty's defaults). Give any chaton its own `key` in the manifest if you
+want a direct shortcut, but you don't have to.
 
-Wire it into kitty declaratively: `chatons keys > ~/.config/kitty/chatons.conf`, add
-`include chatons.conf` to kitty.conf. Edit the manifest → regenerate → reload kitty. A chaton
-is "active" iff it's enabled with a key.
+- `chatons list` — what's installed and any key
+- `chatons run <name>` — run one (what the launcher and keybindings call)
+- `chatons keys` — print the kitty `map` lines for chatons that have a key
+
+Wired declaratively: `chatons keys > ~/.config/kitty/chatons.conf`, `include chatons.conf` in
+kitty.conf. Each overlay is tagged `--var chaton=<name>` so a second press **self-toggles** it
+(no stacking). Edit the manifest → `chezmoi apply` regenerates + reloads.
 
 ## Roadmap
 
