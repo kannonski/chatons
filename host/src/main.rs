@@ -7,11 +7,12 @@
 //! The contract so far:
 //!   guest exports  init()            paint the first frame (optional)
 //!                  on_key(u32)->u32  handle a key; return 0 to quit, else 1
-//!   host provides  host_render(ptr,len)   draw a UTF-8 screen
-//!                  kitty(ptr,len)->i32    run `kitty @ <args>`, return exit code   [v0.3]
+//!   host provides  host_render(ptr,len)      draw a UTF-8 screen
+//!                  kitty(ptr,len)->i32       run `kitty @ <args>`, return exit code  [v0.3]
+//!                  show_image(ptr,len)->i32  display a PNG inline (kitty graphics)   [v0.4]
 //!
-//! Roadmap: v0.4 images via the kitty graphics protocol · v0.5 stabilize the contract as WIT
-//! + a chaton-sdk (read kitty state back into the guest — needs a memory-write protocol).
+//! Roadmap: v0.5 stabilize the contract as WIT + a chaton-sdk, and read kitty state back into
+//! the guest (needs a memory-write protocol).
 
 use anyhow::{Context, Result};
 use crossterm::{
@@ -24,6 +25,7 @@ use crossterm::{
         LeaveAlternateScreen,
     },
 };
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use std::io::{stdout, Write};
 use std::process::{Command, Stdio};
 use wasmtime::{Caller, Engine, Extern, Linker, Module, Store, TypedFunc};
@@ -55,9 +57,41 @@ fn main() -> Result<()> {
             if let Some(bytes) = data.get(start..start.saturating_add(len)) {
                 let screen = String::from_utf8_lossy(bytes).replace('\n', "\r\n");
                 let mut out = stdout();
+                let _ = write!(out, "\x1b_Ga=d\x1b\\"); // clear any kitty images first
                 let _ = queue!(out, Clear(ClearType::All), cursor::MoveTo(0, 0), Print(screen));
                 let _ = out.flush();
             }
+        },
+    )?;
+
+    // show_image(ptr,len) -> i32: read a PNG path, display it inline a few rows down via the
+    // kitty graphics protocol (kitty reads + decodes the file itself). Returns 0, or -1 if the
+    // path read fails. PNG-only for now (f=100,t=f); arbitrary formats = decode-to-RGBA later.
+    linker.func_wrap(
+        "chatons",
+        "show_image",
+        |mut caller: Caller<'_, ()>, ptr: i32, len: i32| -> i32 {
+            let memory = match caller.get_export("memory") {
+                Some(Extern::Memory(m)) => m,
+                _ => return -1,
+            };
+            let data = memory.data(&caller);
+            let (start, len) = (ptr as usize, len as usize);
+            let Some(bytes) = data.get(start..start.saturating_add(len)) else {
+                return -1;
+            };
+            // kitty reads the file itself (its cwd ≠ ours), so send an absolute path.
+            let given = String::from_utf8_lossy(bytes).into_owned();
+            let abs = std::fs::canonicalize(&given)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or(given);
+            let b64 = STANDARD.encode(abs.as_bytes());
+            let mut out = stdout();
+            let _ = queue!(out, cursor::MoveTo(0, 8));
+            // f=100 PNG · a=T transmit+display · t=f path is a file · q=2 suppress responses
+            let _ = write!(out, "\x1b_Gf=100,a=T,t=f,q=2;{b64}\x1b\\");
+            let _ = out.flush();
+            0
         },
     )?;
 

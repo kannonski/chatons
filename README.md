@@ -29,8 +29,9 @@ cargo build --manifest-path examples/hello/Cargo.toml --target wasm32-unknown-un
 cargo run -p chatons -- examples/hello/target/wasm32-unknown-unknown/release/hello_chaton.wasm
 ```
 
-> Needs a real terminal (raw mode), and — for the kitty bridge — kitty with
-> `allow_remote_control` + `listen_on`. Press `n`: a new kitty tab appears.
+> Needs a real terminal (raw mode), and kitty with `allow_remote_control` + `listen_on`.
+> `n` → a new kitty tab · `i` → an inline image · `q` → quit. Run from the repo root so the
+> demo image path resolves.
 
 ## Layout
 
@@ -47,7 +48,7 @@ chaton-sdk/            (later) the guest crate you build a chaton against
 | v0.1 | host loads a chaton, host↔guest calls *(done)* |
 | v0.2 | crossterm event loop — feed keys to the chaton, render its output *(done)* |
 | v0.3 | `kitty @` bridge — a `kitty(args)` host fn; the chaton drives kitty *(done)* |
-| v0.4 | images via the kitty graphics protocol |
+| v0.4 | images — a `show_image(path)` host fn via the kitty graphics protocol *(done)* |
 | v0.5 | stabilize the contract as **WIT** (Component Model) → a `chaton-sdk`, other languages |
 
 ## License
