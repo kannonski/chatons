@@ -25,10 +25,11 @@ rustup target add wasm32-unknown-unknown
 # build the example chaton (a wasm module)
 cargo build --manifest-path examples/hello/Cargo.toml --target wasm32-unknown-unknown --release
 
-# run the host on it
+# run the host on it (opens an interactive screen — press keys, q or esc to quit)
 cargo run -p chatons -- examples/hello/target/wasm32-unknown-unknown/release/hello_chaton.wasm
-# → [chaton] hello from a chaton (Rust → WASM → host)
 ```
+
+> Needs a real terminal (raw mode) — run it in kitty, not a pipe.
 
 ## Layout
 
@@ -43,7 +44,7 @@ chaton-sdk/            (later) the guest crate you build a chaton against
 | | |
 |---|---|
 | v0.1 | host loads a chaton, host↔guest calls *(done)* |
-| v0.2 | crossterm event loop — feed keys to the chaton, render its output |
+| v0.2 | crossterm event loop — feed keys to the chaton, render its output *(done)* |
 | v0.3 | `kitty @` bridge — host fns to open layouts, focus windows |
 | v0.4 | images via the kitty graphics protocol |
 | v0.5 | stabilize the contract as **WIT** (Component Model) → a `chaton-sdk`, other languages |
