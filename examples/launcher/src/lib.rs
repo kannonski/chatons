@@ -1,8 +1,8 @@
-//! launcher-chaton — one key to launch any chaton.
+//! launcher-chaton — one key to find and run any chaton.
 //!
-//! Lists every installed chaton (`host::list_chatons`), filter by typing, `enter` runs the top
-//! match — which the launcher opens as its own overlay (tagged so it self-toggles) and then
-//! exits. One good keybinding for all chatons, instead of a key per chaton.
+//! vim navigation by default (`j`/`k`, `g`/`G`), `/` to search, `enter` to run, `q`/esc to
+//! quit — like matou, for chatons. Each chaton shows its icon (from the manifest). Runs the
+//! selected one by opening it as a tagged overlay, then exits.
 
 // wit-bindgen 0.36's generated export glue isn't edition-2024 lint-clean yet (unsafe-in-unsafe).
 #![allow(unsafe_op_in_unsafe_fn)]
@@ -10,34 +10,58 @@
 wit_bindgen::generate!({ world: "chaton", path: "../../wit" });
 
 use chatons::plugin::host;
+use chatons::plugin::types::ChatonInfo;
 use std::cell::RefCell;
 
 struct Launcher {
-    all: Vec<String>,
+    all: Vec<ChatonInfo>,
     query: String,
+    search: bool,
+    cur: usize,
 }
 
 impl Launcher {
     fn new() -> Self {
-        Launcher { all: host::list_chatons(), query: String::new() }
+        Launcher { all: host::list_chatons(), query: String::new(), search: false, cur: 0 }
     }
 
-    fn matches(&self) -> Vec<&String> {
+    fn view(&self) -> Vec<&ChatonInfo> {
+        if self.query.is_empty() {
+            return self.all.iter().collect();
+        }
         let q = self.query.to_lowercase();
-        self.all.iter().filter(|n| n.to_lowercase().contains(&q)).collect()
+        self.all.iter().filter(|c| c.name.to_lowercase().contains(&q)).collect()
+    }
+
+    fn run(&self) {
+        if let Some(c) = self.view().get(self.cur) {
+            host::kitty(&format!(
+                "launch --type=overlay --cwd=current --var chaton={0} chatons run {0}",
+                c.name
+            ));
+        }
     }
 
     fn draw(&self) {
-        let m = self.matches();
-        let mut s = format!("\n  🐈 chatons\n\n  ❯ {}▌\n\n", self.query);
-        if m.is_empty() {
+        let v = self.view();
+        let mut s = if self.search {
+            format!("\n  🐈 chatons    / {}▌\n\n", self.query)
+        } else {
+            "\n  🐈 chatons\n\n".to_string()
+        };
+        if v.is_empty() {
             s.push_str("  (no match)\n");
         }
-        for (i, name) in m.iter().enumerate() {
-            let cursor = if i == 0 { "▌" } else { " " }; // top match runs on Enter
-            s.push_str(&format!("  {cursor} {name}\n"));
+        for (i, c) in v.iter().enumerate() {
+            let cursor = if i == self.cur { "▌" } else { " " };
+            s.push_str(&format!("  {cursor} {}  {}\n", c.icon, c.name));
         }
-        s.push_str("\n  type to filter · ↵ run top match · esc\n");
+        let footer = if self.search {
+            "type to filter · ↵ run · esc back"
+        } else {
+            "j/k move · / search · ↵ run · q quit"
+        };
+        s.push_str(&format!("\n  {footer}\n"));
         host::render(&s);
     }
 }
@@ -55,23 +79,50 @@ impl Guest for App {
 
     fn on_key(k: Key) -> bool {
         STATE.with_borrow_mut(|s| {
-            match k {
-                Key::Escape => return false,
-                Key::Enter => {
-                    if let Some(name) = s.matches().first() {
-                        // open the chosen chaton as an overlay (tagged so it self-toggles)
-                        host::kitty(&format!(
-                            "launch --type=overlay --cwd=current --var chaton={0} chatons run {0}",
-                            name.as_str()
-                        ));
+            let n = s.view().len();
+            if s.search {
+                match k {
+                    Key::Escape => {
+                        s.search = false;
+                        s.query.clear();
+                        s.cur = 0;
                     }
-                    return false; // launcher exits; the chosen chaton takes over
+                    Key::Enter => {
+                        s.run();
+                        return false;
+                    }
+                    Key::Backspace => {
+                        s.query.pop();
+                        s.cur = 0;
+                    }
+                    Key::Text(c) => {
+                        s.query.push(c);
+                        s.cur = 0;
+                    }
+                    _ => {}
                 }
-                Key::Backspace => {
-                    s.query.pop();
+            } else {
+                match k {
+                    Key::Text('q') | Key::Escape => return false,
+                    Key::Text('j') => {
+                        if s.cur + 1 < n {
+                            s.cur += 1;
+                        }
+                    }
+                    Key::Text('k') => s.cur = s.cur.saturating_sub(1),
+                    Key::Text('g') => s.cur = 0,
+                    Key::Text('G') => s.cur = n.saturating_sub(1),
+                    Key::Text('/') => {
+                        s.search = true;
+                        s.query.clear();
+                        s.cur = 0;
+                    }
+                    Key::Enter => {
+                        s.run();
+                        return false;
+                    }
+                    _ => {}
                 }
-                Key::Text(c) => s.query.push(c),
-                _ => {}
             }
             s.draw();
             true

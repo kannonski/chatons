@@ -104,23 +104,32 @@ impl chatons::plugin::host::Host for State {
             .unwrap_or_default()
     }
 
-    // Names of installed chatons (the *.wasm in the home, minus the launcher itself).
-    fn list_chatons(&mut self) -> Vec<String> {
-        let mut names = Vec::new();
+    // Installed chatons (the *.wasm in the home, minus the launcher), each with its manifest
+    // icon (or a default). For the launcher.
+    fn list_chatons(&mut self) -> Vec<chatons::plugin::types::ChatonInfo> {
+        use chatons::plugin::types::ChatonInfo;
+        let man = manifest();
+        let icon_of = |name: &str| {
+            man.iter()
+                .find(|e| e.name == name)
+                .and_then(|e| e.icon.clone())
+                .unwrap_or_else(|| "▸".to_string())
+        };
+        let mut out = Vec::new();
         if let Ok(entries) = std::fs::read_dir(chatons_home()) {
             for e in entries.flatten() {
                 let p = e.path();
                 if p.extension().and_then(|x| x.to_str()) == Some("wasm") {
                     if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
                         if stem != "launcher" {
-                            names.push(stem.to_string());
+                            out.push(ChatonInfo { name: stem.to_string(), icon: icon_of(stem) });
                         }
                     }
                 }
             }
         }
-        names.sort();
-        names
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
     }
 
     // Live currency rates (USD base). The host has network; the sandboxed chaton doesn't.
@@ -230,6 +239,7 @@ struct Entry {
     name: String,
     key: Option<String>,
     enabled: bool,
+    icon: Option<String>,
 }
 
 /// Parse chatons.toml: `[name]` sections with optional `key = "..."` and `enabled = false`.
@@ -242,12 +252,13 @@ fn manifest() -> Vec<Entry> {
             continue;
         }
         if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            out.push(Entry { name: name.trim().to_string(), key: None, enabled: true });
+            out.push(Entry { name: name.trim().to_string(), key: None, enabled: true, icon: None });
         } else if let Some((k, v)) = line.split_once('=') {
             if let Some(e) = out.last_mut() {
                 match k.trim() {
                     "key" => e.key = Some(v.trim().trim_matches('"').to_string()),
                     "enabled" => e.enabled = v.trim() != "false",
+                    "icon" => e.icon = Some(v.trim().trim_matches('"').to_string()),
                     _ => {}
                 }
             }

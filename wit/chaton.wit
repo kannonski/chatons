@@ -15,11 +15,17 @@ interface types {
         code: string,
         per-usd: f64,
     }
+
+    // an installed chaton (for the launcher): name + display icon
+    record chaton-info {
+        name: string,
+        icon: string,
+    }
 }
 
 // functions the host provides to a chaton
 interface host {
-    use types.{rate};
+    use types.{rate, chaton-info};
 
     render: func(text: string);
     kitty: func(args: string) -> s32;
@@ -30,8 +36,8 @@ interface host {
     exchange-rates: func() -> list<rate>;
     // the visible text of the pane the chaton was opened from — for content-aware chatons
     source-text: func() -> string;
-    // names of installed chatons (for a launcher chaton)
-    list-chatons: func() -> list<string>;
+    // installed chatons (for the launcher): name + icon
+    list-chatons: func() -> list<chaton-info>;
 }
 
 // a chaton: imports the host, exports its lifecycle. The chaton paints by calling host.render
