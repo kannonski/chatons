@@ -42,6 +42,7 @@ host/                  the host (wasmtime + wasmtime-wasi + crossterm + kitty br
 examples/hello/        the reference chaton — drives kitty + inline image
 examples/notepad/      a persistent scratch notepad — loads + saves
 examples/qr/           a self-contained app — type text → a live QR code (scan it)
+examples/fend/         a unit-aware calculator (ports the fend-core crate)
 ```
 
 Chatons aren't only launchers: `qr` is a little app that just renders into the terminal (it
