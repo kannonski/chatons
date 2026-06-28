@@ -8,9 +8,10 @@
 //!   guest exports  init()            paint the first frame (optional)
 //!                  on_key(u32)->u32  handle a key; return 0 to quit, else 1
 //!   host provides  host_render(ptr,len)   draw a UTF-8 screen
+//!                  kitty(ptr,len)->i32    run `kitty @ <args>`, return exit code   [v0.3]
 //!
-//! Roadmap: v0.3 `kitty @` bridge (host fns to open layouts / focus windows) · v0.4 images via
-//! the kitty graphics protocol · v0.5 stabilize the contract as WIT + a chaton-sdk.
+//! Roadmap: v0.4 images via the kitty graphics protocol · v0.5 stabilize the contract as WIT
+//! + a chaton-sdk (read kitty state back into the guest — needs a memory-write protocol).
 
 use anyhow::{Context, Result};
 use crossterm::{
@@ -24,6 +25,7 @@ use crossterm::{
     },
 };
 use std::io::{stdout, Write};
+use std::process::{Command, Stdio};
 use wasmtime::{Caller, Engine, Extern, Linker, Module, Store, TypedFunc};
 
 fn main() -> Result<()> {
@@ -55,6 +57,38 @@ fn main() -> Result<()> {
                 let mut out = stdout();
                 let _ = queue!(out, Clear(ClearType::All), cursor::MoveTo(0, 0), Print(screen));
                 let _ = out.flush();
+            }
+        },
+    )?;
+
+    // kitty(ptr,len) -> i32: the chaton's hook into kitty. Runs `kitty @ <args>` (args split on
+    // whitespace) — open tabs, focus windows, set titles, … Returns the exit code (0 = ok,
+    // -1 = couldn't spawn). Child stdio is nulled so it can't corrupt the chaton's screen.
+    // Requires chatons to run inside kitty with remote control enabled.
+    linker.func_wrap(
+        "chatons",
+        "kitty",
+        |mut caller: Caller<'_, ()>, ptr: i32, len: i32| -> i32 {
+            let memory = match caller.get_export("memory") {
+                Some(Extern::Memory(m)) => m,
+                _ => return -1,
+            };
+            let data = memory.data(&caller);
+            let (start, len) = (ptr as usize, len as usize);
+            let Some(bytes) = data.get(start..start.saturating_add(len)) else {
+                return -1;
+            };
+            let cmd = String::from_utf8_lossy(bytes).into_owned();
+            let args: Vec<&str> = cmd.split_whitespace().collect();
+            match Command::new("kitty")
+                .arg("@")
+                .args(&args)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+            {
+                Ok(status) => status.code().unwrap_or(-1),
+                Err(_) => -1,
             }
         },
     )?;
