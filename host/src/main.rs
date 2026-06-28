@@ -11,6 +11,7 @@
 //!                  kitty(ptr,len)->i32       run `kitty @ <args>`, return exit code  [v0.3]
 //!                  show_image(ptr,len)->i32  display a PNG inline (kitty graphics)   [v0.4]
 //!                  write_file(p,lp,d,ld)->i32 persist data to a file (guest → host)
+//!                  read_file(p,lp,buf,cap)->i32 read a file into a guest buffer (host → guest) [v0.6]
 //!
 //! The guest side of this contract is wrapped by the `chaton-sdk` crate (the `Chaton` trait +
 //! `chaton!` macro), so chaton authors never touch FFI. Roadmap: stabilize the contract as WIT
@@ -150,6 +151,41 @@ fn main() -> Result<()> {
                 return -1;
             };
             std::fs::write(&path, content.as_bytes()).map(|_| 0).unwrap_or(-1)
+        },
+    )?;
+
+    // read_file(path, buf, cap) -> i32: the host→guest data direction. Copies up to `cap` bytes
+    // of the file into the guest buffer at `buf`, and returns the file's FULL length — so if the
+    // buffer was too small the guest grows it and calls again. -1 on error. The chaton-sdk hides
+    // this grow-and-retry behind a plain `read_file(path) -> Option<String>`.
+    linker.func_wrap(
+        "chatons",
+        "read_file",
+        |mut caller: Caller<'_, ()>, ppath: i32, lpath: i32, pbuf: i32, cap: i32| -> i32 {
+            let memory = match caller.get_export("memory") {
+                Some(Extern::Memory(m)) => m,
+                _ => return -1,
+            };
+            let path = {
+                let data = memory.data(&caller);
+                let (p, l) = (ppath as usize, lpath as usize);
+                match data.get(p..p.saturating_add(l)) {
+                    Some(b) => String::from_utf8_lossy(b).into_owned(),
+                    None => return -1,
+                }
+            };
+            let contents = match std::fs::read(&path) {
+                Ok(c) => c,
+                Err(_) => return -1,
+            };
+            let n = contents.len().min(cap.max(0) as usize);
+            let dst = memory.data_mut(&mut caller);
+            let p = pbuf as usize;
+            match dst.get_mut(p..p.saturating_add(n)) {
+                Some(slot) => slot.copy_from_slice(&contents[..n]),
+                None => return -1,
+            }
+            contents.len() as i32
         },
     )?;
 

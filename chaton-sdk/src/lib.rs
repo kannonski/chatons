@@ -37,6 +37,8 @@ unsafe extern "C" {
     fn raw_show_image(ptr: *const u8, len: usize) -> i32;
     #[link_name = "write_file"]
     fn raw_write_file(ppath: *const u8, lpath: usize, pdata: *const u8, ldata: usize) -> i32;
+    #[link_name = "read_file"]
+    fn raw_read_file(ppath: *const u8, lpath: usize, pbuf: *mut u8, cap: usize) -> i32;
 }
 
 /// Run `kitty @ <args>` (e.g. `kitty("launch --type=tab")`). Returns the exit code (0 = ok).
@@ -61,6 +63,26 @@ pub fn write_file(path: &str, contents: &str) -> i32 {
             contents.as_ptr(),
             contents.len(),
         )
+    }
+}
+
+/// Read a file from the host's filesystem into the guest. Returns its contents, or `None` if it
+/// doesn't exist (or isn't valid UTF-8). This is the host→guest data direction: the host writes
+/// into a buffer we provide, returning the full length so we can grow and retry if it was short.
+pub fn read_file(path: &str) -> Option<String> {
+    let mut cap = 1024usize;
+    loop {
+        let mut buf = vec![0u8; cap];
+        let n = unsafe { raw_read_file(path.as_ptr(), path.len(), buf.as_mut_ptr(), buf.len()) };
+        if n < 0 {
+            return None;
+        }
+        let n = n as usize;
+        if n <= cap {
+            buf.truncate(n);
+            return String::from_utf8(buf).ok();
+        }
+        cap = n; // buffer was too small → grow to the exact size and retry
     }
 }
 

@@ -1,11 +1,10 @@
-//! notepad-chaton — a scratch notepad, written against `chaton-sdk`.
+//! notepad-chaton — a persistent scratch notepad, written against `chaton-sdk`.
 //!
-//! Type freely, Backspace deletes, Esc saves to a file and quits. A real (if minimal) use of a
-//! chaton: it captures text input and persists to disk through the host's `write_file`. Append
-//! /backspace only for now (no cursor movement); loading the file back waits on the host→guest
-//! data direction.
+//! Loads its notes on open (`read_file`), type freely, Backspace deletes, Esc saves and quits
+//! (`write_file`). A real use of a chaton: text input + persistence, both directions of the
+//! host data bridge. Append/backspace only for now (no cursor movement).
 
-use chaton_sdk::{Chaton, Flow, Key, View, chaton, write_file};
+use chaton_sdk::{Chaton, Flow, Key, View, chaton, read_file, write_file};
 
 const PATH: &str = "/tmp/chaton-notes.txt";
 
@@ -15,7 +14,7 @@ struct Notepad {
 
 impl Chaton for Notepad {
     fn new() -> Self {
-        Notepad { buf: String::new() }
+        Notepad { buf: read_file(PATH).unwrap_or_default() }
     }
 
     fn on_key(&mut self, key: Key) -> Flow {
@@ -36,7 +35,7 @@ impl Chaton for Notepad {
 
     fn render(&self) -> View {
         View::text(format!(
-            "  📝 chatons notepad  →  {PATH}\n  ────────────────────────────────────────\n{}▌\n\n  type freely · Backspace deletes · Esc saves & quits",
+            "  📝 chatons notepad  →  {PATH}\n  ────────────────────────────────────────\n{}▌\n\n  loads on open · type freely · Backspace · Esc saves & quits",
             self.buf
         ))
     }

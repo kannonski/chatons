@@ -39,7 +39,7 @@ cargo run -p chatons -- examples/hello/target/wasm32-unknown-unknown/release/hel
 host/                  the chatons host binary (wasmtime + crossterm + kitty bridge)
 chaton-sdk/            the crate you write a chaton against (the Chaton trait + chaton! macro)
 examples/hello/        the reference chaton — drives kitty + inline image
-examples/notepad/      a scratch notepad — text input, saves via the write_file host fn
+examples/notepad/      a persistent scratch notepad — loads + saves (read_file/write_file)
 ```
 
 Run a different chaton by pointing the host at its `.wasm`:
@@ -89,7 +89,8 @@ Rust; once the contract is pinned as WIT, chatons in any language.)
 | v0.3 | `kitty @` bridge — a `kitty(args)` host fn; the chaton drives kitty *(done)* |
 | v0.4 | images — a `show_image(path)` host fn via the kitty graphics protocol *(done)* |
 | v0.5 | `chaton-sdk` — the `Chaton` trait + `chaton!` macro, write a chaton without FFI *(done)* |
-| v0.6 | stabilize the contract as **WIT** (Component Model) → chatons in any language |
+| v0.6 | host→guest data — `read_file` (notepad loads its notes); the read direction *(done)* |
+| v0.7 | stabilize the contract as **WIT** (Component Model) → chatons in any language |
 
 ## License
 
