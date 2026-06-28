@@ -10,6 +10,7 @@
 //!   host provides  host_render(ptr,len)      draw a UTF-8 screen
 //!                  kitty(ptr,len)->i32       run `kitty @ <args>`, return exit code  [v0.3]
 //!                  show_image(ptr,len)->i32  display a PNG inline (kitty graphics)   [v0.4]
+//!                  write_file(p,lp,d,ld)->i32 persist data to a file (guest → host)
 //!
 //! The guest side of this contract is wrapped by the `chaton-sdk` crate (the `Chaton` trait +
 //! `chaton!` macro), so chaton authors never touch FFI. Roadmap: stabilize the contract as WIT
@@ -128,6 +129,30 @@ fn main() -> Result<()> {
         },
     )?;
 
+    // write_file(path, data) -> i32: persist data to a file (guest → host direction). 0 = ok.
+    // Unrestricted for now — a per-chaton permission/capability grant is the "sandboxed" part,
+    // a later step. The reverse (read a file back into the guest) needs a memory-write protocol.
+    linker.func_wrap(
+        "chatons",
+        "write_file",
+        |mut caller: Caller<'_, ()>, ppath: i32, lpath: i32, pdata: i32, ldata: i32| -> i32 {
+            let memory = match caller.get_export("memory") {
+                Some(Extern::Memory(m)) => m,
+                _ => return -1,
+            };
+            let data = memory.data(&caller);
+            let read = |p: i32, l: i32| -> Option<String> {
+                let (p, l) = (p as usize, l as usize);
+                data.get(p..p.saturating_add(l))
+                    .map(|b| String::from_utf8_lossy(b).into_owned())
+            };
+            let (Some(path), Some(content)) = (read(ppath, lpath), read(pdata, ldata)) else {
+                return -1;
+            };
+            std::fs::write(&path, content.as_bytes()).map(|_| 0).unwrap_or(-1)
+        },
+    )?;
+
     let instance = linker.instantiate(&mut store, &module)?;
     let init = instance.get_typed_func::<(), ()>(&mut store, "init").ok();
     let on_key = instance
@@ -162,6 +187,7 @@ fn event_loop(
             KeyCode::Char(c) => c as u32,
             KeyCode::Esc => 27,
             KeyCode::Enter => 13,
+            KeyCode::Backspace => 8,
             _ => 0,
         };
         if on_key.call(&mut *store, code)? == 0 {

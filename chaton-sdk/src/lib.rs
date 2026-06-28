@@ -35,6 +35,8 @@ unsafe extern "C" {
     fn raw_kitty(ptr: *const u8, len: usize) -> i32;
     #[link_name = "show_image"]
     fn raw_show_image(ptr: *const u8, len: usize) -> i32;
+    #[link_name = "write_file"]
+    fn raw_write_file(ppath: *const u8, lpath: usize, pdata: *const u8, ldata: usize) -> i32;
 }
 
 /// Run `kitty @ <args>` (e.g. `kitty("launch --type=tab")`). Returns the exit code (0 = ok).
@@ -48,10 +50,25 @@ pub fn show_image(path: &str) -> i32 {
     unsafe { raw_show_image(path.as_ptr(), path.len()) }
 }
 
+/// Write `contents` to `path` on the host's filesystem. Returns 0 on success, -1 on failure.
+/// (Reading a file back into the guest isn't supported yet — that needs the host→guest data
+/// direction, a later addition.)
+pub fn write_file(path: &str, contents: &str) -> i32 {
+    unsafe {
+        raw_write_file(
+            path.as_ptr(),
+            path.len(),
+            contents.as_ptr(),
+            contents.len(),
+        )
+    }
+}
+
 /// A key handed to [`Chaton::on_key`]. The host currently sends characters, Enter and Esc.
 pub enum Key {
     Char(char),
     Enter,
+    Backspace,
     Esc,
     Other(u32),
 }
@@ -60,6 +77,7 @@ impl Key {
     #[doc(hidden)]
     pub fn from_code(code: u32) -> Key {
         match code {
+            8 => Key::Backspace,
             13 => Key::Enter,
             27 => Key::Esc,
             c => char::from_u32(c).map(Key::Char).unwrap_or(Key::Other(c)),

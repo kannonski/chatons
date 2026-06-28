@@ -1,0 +1,12 @@
+[package]
+name = "notepad-chaton"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[lib]
+name = "notepad_chaton"
+crate-type = ["cdylib"]
+
+[dependencies]
+chaton-sdk = { path = "../../chaton-sdk" }

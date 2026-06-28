@@ -38,7 +38,16 @@ cargo run -p chatons -- examples/hello/target/wasm32-unknown-unknown/release/hel
 ```
 host/                  the chatons host binary (wasmtime + crossterm + kitty bridge)
 chaton-sdk/            the crate you write a chaton against (the Chaton trait + chaton! macro)
-examples/hello/        the reference chaton (Rust → wasm) — copy it to start your own
+examples/hello/        the reference chaton — drives kitty + inline image
+examples/notepad/      a scratch notepad — text input, saves via the write_file host fn
+```
+
+Run a different chaton by pointing the host at its `.wasm`:
+
+```sh
+cargo build --manifest-path examples/notepad/Cargo.toml --target wasm32-unknown-unknown --release
+cargo run -p chatons -- examples/notepad/target/wasm32-unknown-unknown/release/notepad_chaton.wasm
+# type · Backspace · Esc saves to /tmp/chaton-notes.txt and quits
 ```
 
 ## Write a chaton
