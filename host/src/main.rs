@@ -11,8 +11,9 @@
 //!                  kitty(ptr,len)->i32       run `kitty @ <args>`, return exit code  [v0.3]
 //!                  show_image(ptr,len)->i32  display a PNG inline (kitty graphics)   [v0.4]
 //!
-//! Roadmap: v0.5 stabilize the contract as WIT + a chaton-sdk, and read kitty state back into
-//! the guest (needs a memory-write protocol).
+//! The guest side of this contract is wrapped by the `chaton-sdk` crate (the `Chaton` trait +
+//! `chaton!` macro), so chaton authors never touch FFI. Roadmap: stabilize the contract as WIT
+//! (Component Model) for polyglot chatons, and read kitty state back into the guest.
 
 use anyhow::{Context, Result};
 use crossterm::{

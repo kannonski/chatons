@@ -36,10 +36,40 @@ cargo run -p chatons -- examples/hello/target/wasm32-unknown-unknown/release/hel
 ## Layout
 
 ```
-host/                  the chatons host binary (wasmtime + — later — ratatui + kitty bridge)
-examples/hello/        the smallest chaton (Rust → wasm)
-chaton-sdk/            (later) the guest crate you build a chaton against
+host/                  the chatons host binary (wasmtime + crossterm + kitty bridge)
+chaton-sdk/            the crate you write a chaton against (the Chaton trait + chaton! macro)
+examples/hello/        the reference chaton (Rust → wasm) — copy it to start your own
 ```
+
+## Write a chaton
+
+A chaton is a struct that implements `Chaton` — no `unsafe`, no FFI:
+
+```rust
+use chaton_sdk::{Chaton, Flow, Key, View, chaton, kitty};
+
+struct Mine { tabs: u32 }
+
+impl Chaton for Mine {
+    fn new() -> Self { Mine { tabs: 0 } }
+    fn on_key(&mut self, key: Key) -> Flow {
+        match key {
+            Key::Char('q') | Key::Esc => return Flow::Quit,
+            Key::Char('n') => { kitty("launch --type=tab"); self.tabs += 1; }
+            _ => {}
+        }
+        Flow::Continue
+    }
+    fn render(&self) -> View {
+        View::text(format!("tabs: {}\n\nn  new tab · q  quit", self.tabs))
+    }
+}
+
+chaton!(Mine);
+```
+
+Build it for `wasm32-unknown-unknown` and hand the `.wasm` to the host. (Today the SDK is
+Rust; once the contract is pinned as WIT, chatons in any language.)
 
 ## Roadmap
 
@@ -49,7 +79,8 @@ chaton-sdk/            (later) the guest crate you build a chaton against
 | v0.2 | crossterm event loop — feed keys to the chaton, render its output *(done)* |
 | v0.3 | `kitty @` bridge — a `kitty(args)` host fn; the chaton drives kitty *(done)* |
 | v0.4 | images — a `show_image(path)` host fn via the kitty graphics protocol *(done)* |
-| v0.5 | stabilize the contract as **WIT** (Component Model) → a `chaton-sdk`, other languages |
+| v0.5 | `chaton-sdk` — the `Chaton` trait + `chaton!` macro, write a chaton without FFI *(done)* |
+| v0.6 | stabilize the contract as **WIT** (Component Model) → chatons in any language |
 
 ## License
 

@@ -1,0 +1,8 @@
+[package]
+name = "chaton-sdk"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Write a kitty chaton (a WASM plugin for chatons) as a trait — no raw FFI."
+
+# A normal lib: the chaton that depends on it is the cdylib compiled to wasm.

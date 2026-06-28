@@ -4,4 +4,4 @@
 [workspace]
 resolver = "2"
 members = ["host"]
-exclude = ["examples/hello"]
+exclude = ["examples/hello", "chaton-sdk"]

@@ -1,10 +1,12 @@
 [package]
 name = "hello-chaton"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 
-# A chaton is a wasm module: a cdylib that imports host functions and exports entry points.
 [lib]
 name = "hello_chaton"
 crate-type = ["cdylib"]
+
+[dependencies]
+chaton-sdk = { path = "../../chaton-sdk" }
