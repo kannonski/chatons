@@ -82,6 +82,34 @@ export!(App);
 Build it for `wasm32-wasip2`. The contract is the WIT — implement it in **any language** with
 component-model tooling, not just Rust. (See `examples/` for the full versions with state.)
 
+## Managing chatons
+
+Installed chatons live in `~/.config/chatons/` (override with `$CHATONS_HOME`):
+
+```
+~/.config/chatons/
+  notepad.wasm
+  qr.wasm
+  chatons.toml      # what's enabled, and its key
+```
+
+```toml
+[notepad]
+key = "ctrl+shift+n"
+[qr]
+key = "ctrl+shift+r"
+[hello]
+enabled = false     # installed, but off
+```
+
+- `chatons list` — what's installed, enabled, and its key
+- `chatons run <name>` — run one (this is what the keybindings call)
+- `chatons keys` — print the kitty `map` lines for enabled chatons
+
+Wire it into kitty declaratively: `chatons keys > ~/.config/kitty/chatons.conf`, add
+`include chatons.conf` to kitty.conf. Edit the manifest → regenerate → reload kitty. A chaton
+is "active" iff it's enabled with a key.
+
 ## Roadmap
 
 | | |
@@ -93,6 +121,7 @@ component-model tooling, not just Rust. (See `examples/` for the full versions w
 | v0.5 | `chaton-sdk` — the `Chaton` trait + `chaton!` macro, write a chaton without FFI *(done)* |
 | v0.6 | host→guest data — `read_file` (notepad loads its notes); the read direction *(done)* |
 | v0.7 | **WIT / Component Model** — the contract is `wit/chaton.wit`, rich types, chatons in any language *(done)* |
+| v0.8 | a manager — `chatons list/run/keys` + `~/.config/chatons` manifest → kitty keybindings *(done)* |
 | next | a chaton in a second language (TinyGo / Zig) to exercise the polyglot promise |
 
 ## License
