@@ -18,11 +18,18 @@ struct Launcher {
     query: String,
     search: bool,
     cur: usize,
+    pending_g: bool, // first `g` of a `gg` jump-to-top
 }
 
 impl Launcher {
     fn new() -> Self {
-        Launcher { all: host::list_chatons(), query: String::new(), search: false, cur: 0 }
+        Launcher {
+            all: host::list_chatons(),
+            query: String::new(),
+            search: false,
+            cur: 0,
+            pending_g: false,
+        }
     }
 
     fn view(&self) -> Vec<&ChatonInfo> {
@@ -102,6 +109,8 @@ impl Guest for App {
                     _ => {}
                 }
             } else {
+                let pending_g = s.pending_g;
+                s.pending_g = false; // any key cancels a half-typed `gg`
                 match k {
                     Key::Text('q') | Key::Escape => return false,
                     Key::Text('j') => {
@@ -110,7 +119,13 @@ impl Guest for App {
                         }
                     }
                     Key::Text('k') => s.cur = s.cur.saturating_sub(1),
-                    Key::Text('g') => s.cur = 0,
+                    Key::Text('g') => {
+                        if pending_g {
+                            s.cur = 0; // gg → top
+                        } else {
+                            s.pending_g = true; // first g, await the second
+                        }
+                    }
                     Key::Text('G') => s.cur = n.saturating_sub(1),
                     Key::Text('/') => {
                         s.search = true;
