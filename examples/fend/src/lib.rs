@@ -10,16 +10,42 @@
 wit_bindgen::generate!({ world: "chaton", path: "../../wit" });
 
 use chatons::plugin::host;
+use fend_core::{Context, ExchangeRateFnV2, ExchangeRateFnV2Options};
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::error::Error;
+
+// fend wants `units of <code> per 1 base-unit` (we use USD as the base) — return per_usd as-is.
+struct Rates(HashMap<String, f64>);
+
+impl ExchangeRateFnV2 for Rates {
+    fn relative_to_base_currency(
+        &self,
+        currency: &str,
+        _options: &ExchangeRateFnV2Options,
+    ) -> Result<f64, Box<dyn Error + Send + Sync + 'static>> {
+        self.0
+            .get(currency)
+            .copied()
+            .ok_or_else(|| format!("no rate for {currency}").into())
+    }
+}
 
 struct Fend {
     buf: String,
-    ctx: fend_core::Context,
+    ctx: Context,
 }
 
 impl Fend {
     fn new() -> Self {
-        Fend { buf: String::new(), ctx: fend_core::Context::new() }
+        let mut ctx = Context::new();
+        // currency conversion needs live rates; the host fetches them (the chaton can't network)
+        let rates: HashMap<String, f64> =
+            host::exchange_rates().into_iter().map(|r| (r.code, r.per_usd)).collect();
+        if !rates.is_empty() {
+            ctx.set_exchange_rate_handler_v2(Rates(rates));
+        }
+        Fend { buf: String::new(), ctx }
     }
 
     fn draw(&mut self) {

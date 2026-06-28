@@ -9,15 +9,25 @@ interface types {
         escape,
         other(u32),
     }
+
+    // an exchange rate: units of `code` per 1 USD (e.g. EUR -> 0.92)
+    record rate {
+        code: string,
+        per-usd: f64,
+    }
 }
 
 // functions the host provides to a chaton
 interface host {
+    use types.{rate};
+
     render: func(text: string);
     kitty: func(args: string) -> s32;
     show-image: func(path: string) -> s32;
     write-file: func(path: string, data: string) -> s32;
     read-file: func(path: string) -> option<string>;
+    // live currency rates (USD base), fetched + cached by the host (chatons can't network)
+    exchange-rates: func() -> list<rate>;
 }
 
 // a chaton: imports the host, exports its lifecycle. The chaton paints by calling host.render

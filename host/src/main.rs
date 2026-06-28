@@ -91,6 +91,66 @@ impl chatons::plugin::host::Host for State {
     fn read_file(&mut self, path: String) -> Option<String> {
         std::fs::read_to_string(&path).ok()
     }
+
+    // Live currency rates (USD base). The host has network; the sandboxed chaton doesn't.
+    fn exchange_rates(&mut self) -> Vec<chatons::plugin::types::Rate> {
+        fetch_rates()
+            .into_iter()
+            .map(|(code, per_usd)| chatons::plugin::types::Rate { code, per_usd })
+            .collect()
+    }
+}
+
+/// Fetch USD-base exchange rates (units of <code> per 1 USD), cached to ~/.config/chatons/
+/// rates.json with a 12h TTL. Falls back to the cache (even stale) when offline.
+fn fetch_rates() -> Vec<(String, f64)> {
+    let cache = chatons_home().join("rates.json");
+    let fresh = std::fs::metadata(&cache)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < std::time::Duration::from_secs(12 * 3600));
+
+    let json = if fresh {
+        std::fs::read_to_string(&cache).ok()
+    } else {
+        match ureq::get("https://open.er-api.com/v6/latest/USD").call() {
+            Ok(resp) => {
+                let body = resp.into_string().ok();
+                if let Some(b) = &body {
+                    let _ = std::fs::create_dir_all(chatons_home());
+                    let _ = std::fs::write(&cache, b);
+                }
+                body.or_else(|| std::fs::read_to_string(&cache).ok())
+            }
+            Err(_) => std::fs::read_to_string(&cache).ok(), // offline → stale cache if any
+        }
+    };
+
+    let Some(json) = json else { return vec![] };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
+        return vec![];
+    };
+    let mut out = Vec::new();
+    if let Some(rates) = v["rates"].as_object() {
+        for (code, rate) in rates {
+            if let Some(per_usd) = rate.as_f64() {
+                out.push((code.clone(), per_usd));
+            }
+        }
+    }
+    out
+}
+
+fn cmd_rates() -> Result<()> {
+    let rates = fetch_rates();
+    println!("{} currencies (USD base)", rates.len());
+    for (code, per_usd) in rates.iter().filter(|(c, _)| {
+        ["USD", "EUR", "CHF", "GBP", "JPY"].contains(&c.as_str())
+    }) {
+        println!("  1 USD = {per_usd} {code}");
+    }
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -98,6 +158,7 @@ fn main() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("list") => cmd_list(),
         Some("keys") => cmd_keys(),
+        Some("rates") => cmd_rates(),
         Some("run") => {
             let target = args.get(1).context("usage: chatons run <name|path.wasm>")?;
             run_chaton(&resolve(target))
