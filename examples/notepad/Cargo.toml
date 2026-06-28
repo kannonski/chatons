@@ -9,4 +9,4 @@ name = "notepad_chaton"
 crate-type = ["cdylib"]
 
 [dependencies]
-chaton-sdk = { path = "../../chaton-sdk" }
+wit-bindgen = "0.36"

@@ -1,10 +1,16 @@
-//! notepad-chaton — a persistent scratch notepad, written against `chaton-sdk`.
+//! notepad-chaton — a persistent scratch notepad, as a WASM component.
 //!
-//! Loads its notes on open (`read_file`), type freely, Backspace deletes, Esc saves and quits
-//! (`write_file`). A real use of a chaton: text input + persistence, both directions of the
-//! host data bridge. Append/backspace only for now (no cursor movement).
+//! Loads its notes on open and saves on Esc — through the host's `read-file` / `write-file`.
+//! Note `host::read_file` returns `Option<String>` *directly* (the WIT type), no buffer dance:
+//! the win of moving to the component model.
 
-use chaton_sdk::{Chaton, Flow, Key, View, chaton, read_file, write_file};
+// wit-bindgen 0.36's generated export glue isn't edition-2024 lint-clean yet (unsafe-in-unsafe).
+#![allow(unsafe_op_in_unsafe_fn)]
+
+wit_bindgen::generate!({ world: "chaton", path: "../../wit" });
+
+use chatons::plugin::host;
+use std::cell::RefCell;
 
 const PATH: &str = "/tmp/chaton-notes.txt";
 
@@ -12,33 +18,48 @@ struct Notepad {
     buf: String,
 }
 
-impl Chaton for Notepad {
+impl Notepad {
     fn new() -> Self {
-        Notepad { buf: read_file(PATH).unwrap_or_default() }
+        Notepad { buf: host::read_file(PATH).unwrap_or_default() }
     }
 
-    fn on_key(&mut self, key: Key) -> Flow {
-        match key {
-            Key::Esc => {
-                write_file(PATH, &self.buf);
-                return Flow::Quit;
-            }
-            Key::Enter => self.buf.push('\n'),
-            Key::Backspace => {
-                self.buf.pop();
-            }
-            Key::Char(c) => self.buf.push(c),
-            Key::Other(_) => {}
-        }
-        Flow::Continue
-    }
-
-    fn render(&self) -> View {
-        View::text(format!(
+    fn draw(&self) {
+        host::render(&format!(
             "  📝 chatons notepad  →  {PATH}\n  ────────────────────────────────────────\n{}▌\n\n  loads on open · type freely · Backspace · Esc saves & quits",
             self.buf
-        ))
+        ));
     }
 }
 
-chaton!(Notepad);
+thread_local! {
+    static STATE: RefCell<Notepad> = RefCell::new(Notepad::new());
+}
+
+struct App;
+
+impl Guest for App {
+    fn init() {
+        STATE.with_borrow(|s| s.draw());
+    }
+
+    fn on_key(k: Key) -> bool {
+        STATE.with_borrow_mut(|s| {
+            match k {
+                Key::Escape => {
+                    host::write_file(PATH, &s.buf);
+                    return false;
+                }
+                Key::Enter => s.buf.push('\n'),
+                Key::Backspace => {
+                    s.buf.pop();
+                }
+                Key::Text(c) => s.buf.push(c),
+                Key::Other(_) => {}
+            }
+            s.draw();
+            true
+        })
+    }
+}
+
+export!(App);
