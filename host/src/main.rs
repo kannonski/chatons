@@ -26,7 +26,20 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 
 wasmtime::component::bindgen!({ world: "chaton", path: "../wit" });
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+/// Standard base64 (padded) — only used to encode an image path for kitty's graphics protocol, so
+/// a 12-line encoder beats a whole crate dependency (chatons stays lean).
+fn b64(data: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        out.push(A[(n >> 18 & 63) as usize] as char);
+        out.push(A[(n >> 12 & 63) as usize] as char);
+        out.push(if c.len() > 1 { A[(n >> 6 & 63) as usize] as char } else { '=' });
+        out.push(if c.len() > 2 { A[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
 
 // Components built for wasm32-wasip2 import WASI (std uses it), so the host must provide it.
 struct State {
@@ -76,7 +89,7 @@ impl chatons::plugin::host::Host for State {
         let abs = std::fs::canonicalize(&path)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or(path);
-        let b64 = STANDARD.encode(abs.as_bytes());
+        let b64 = b64(abs.as_bytes());
         let mut out = stdout();
         let _ = queue!(out, cursor::MoveTo(0, 8));
         let _ = write!(out, "\x1b_Gf=100,a=T,t=f,q=2;{b64}\x1b\\");
@@ -421,5 +434,20 @@ fn event_loop(store: &mut Store<State>, bindings: &Chaton) -> Result<()> {
         if !bindings.call_on_key(&mut *store, k)? {
             return Ok(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::b64;
+    #[test]
+    fn base64_rfc4648_vectors() {
+        assert_eq!(b64(b""), "");
+        assert_eq!(b64(b"f"), "Zg==");
+        assert_eq!(b64(b"fo"), "Zm8=");
+        assert_eq!(b64(b"foo"), "Zm9v");
+        assert_eq!(b64(b"Man"), "TWFu");
+        assert_eq!(b64(b"hello"), "aGVsbG8=");
+        assert_eq!(b64(b"/home/okkan/cat.png"), "L2hvbWUvb2trYW4vY2F0LnBuZw==");
     }
 }
