@@ -27,6 +27,7 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 wasmtime::component::bindgen!({ world: "chaton", path: "../wit" });
 
 mod mirror;
+mod mirror_p2p;
 mod mirror_wt;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -238,6 +239,7 @@ fn main() -> Result<()> {
         Some("keys") => cmd_keys(),
         Some("rates") => cmd_rates(),
         Some("mirror") => mirror::run(&args[1..]),
+        Some("mirror-open") => mirror_p2p::open(args.get(1)),
         Some("run") => {
             let target = args.get(1).context("usage: chatons run <name|path.wasm>")?;
             run_named(target)
@@ -246,7 +248,7 @@ fn main() -> Result<()> {
         Some(target) => run_named(target),
         None => {
             eprintln!(
-                "chatons — a WASM plugin host for kitty\n\nusage:\n  chatons run <name>            run a chaton from ~/.config/chatons\n  chatons list                  list installed chatons\n  chatons keys                  print kitty keybindings for enabled chatons\n  chatons mirror --window <id>  serve a live view of a kitty window in the local browser"
+                "chatons — a WASM plugin host for kitty\n\nusage:\n  chatons run <name>            run a chaton from ~/.config/chatons\n  chatons list                  list installed chatons\n  chatons keys                  print kitty keybindings for enabled chatons\n  chatons mirror --window <id>  serve a live view of a kitty window in the local browser\n  chatons mirror … --p2p        also expose it over iroh P2P (prints a ticket)\n  chatons mirror-open <ticket>  dial a P2P ticket and render the remote terminal here"
             );
             std::process::exit(2);
         }

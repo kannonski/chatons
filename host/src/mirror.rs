@@ -67,10 +67,12 @@ pub fn run(args: &[String]) -> Result<()> {
     let mut port: u16 = 9123;
     let mut bind = "127.0.0.1".to_string();
     let mut do_stop = false;
+    let mut p2p = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--stop" => do_stop = true,
+            "--p2p" => p2p = true,
             "--window" | "-w" => {
                 window = args.get(i + 1).cloned();
                 i += 1;
@@ -133,6 +135,12 @@ pub fn run(args: &[String]) -> Result<()> {
             println!("  WebTransport on udp/{quic_port}");
         }
         Err(e) => eprintln!("  WebTransport disabled (cert: {e}); SSE only"),
+    }
+
+    // P2P (iroh) — opt-in via --p2p; dial-from-anywhere over QUIC + NAT traversal + relay
+    if p2p {
+        let ms = matchspec.clone();
+        std::thread::spawn(move || crate::mirror_p2p::serve(ms));
     }
 
     for stream in listener.incoming() {
