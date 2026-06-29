@@ -74,6 +74,19 @@ impl chatons::plugin::host::Host for State {
         }
     }
 
+    // Like `kitty`, but returns stdout (trimmed). `kitty @ launch` prints the new window id, which
+    // the mirror's "new stream tab" mode needs to point the daemon at the freshly created tab.
+    fn kitty_capture(&mut self, args: String) -> String {
+        let parts: Vec<&str> = args.split_whitespace().collect();
+        Command::new("kitty")
+            .arg("@")
+            .args(&parts)
+            .stderr(Stdio::null())
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
+    }
+
     fn show_image(&mut self, path: String) -> i32 {
         // kitty opens the file itself (its cwd ≠ ours), so send an absolute path.
         let abs = std::fs::canonicalize(&path)

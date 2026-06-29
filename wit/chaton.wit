@@ -29,6 +29,9 @@ interface host {
 
     render: func(text: string);
     kitty: func(args: string) -> s32;
+    // like kitty(), but returns the command's stdout (trimmed) — e.g. `launch` prints the new
+    // window id, which the mirror's "new stream tab" needs
+    kitty-capture: func(args: string) -> string;
     show-image: func(path: string) -> s32;
     write-file: func(path: string, data: string) -> s32;
     read-file: func(path: string) -> option<string>;
