@@ -27,6 +27,7 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 wasmtime::component::bindgen!({ world: "chaton", path: "../wit" });
 
 mod mirror;
+mod mirror_wt;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
@@ -116,6 +117,9 @@ impl chatons::plugin::host::Host for State {
     // children don't get the socket env — and `setsid` puts it in its own session so it keeps
     // serving after this overlay closes.
     fn start_mirror(&mut self, window: String, port: u32) -> String {
+        // clear any stale/previous daemon squatting the port so a relaunch always wins (a single
+        // shared port can't reliably be stopped by pidfile alone — see the zombie-daemon lesson)
+        crate::mirror::kill_port(port as u16);
         let _ = Command::new("setsid")
             .args(["chatons", "mirror", "--window", &window, "--port", &port.to_string()])
             .stdin(Stdio::null())

@@ -22,35 +22,55 @@ use std::net::{TcpListener, TcpStream};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::Duration;
+
+// (cert hash as dotted-hex, quic port) — set once at startup if WebTransport comes up, then read
+// by page() to bootstrap the browser's serverCertificateHashes. Empty hash ⇒ SSE-only.
+static WT_INFO: OnceLock<(String, u16)> = OnceLock::new();
 
 fn pidfile() -> PathBuf {
     crate::chatons_home().join("mirror.pid")
 }
 
-fn stop() -> Result<()> {
-    match std::fs::read_to_string(pidfile()) {
-        Ok(pid) => {
-            let pid = pid.trim();
-            let _ = Command::new("kill").arg(pid).status();
-            let _ = std::fs::remove_file(pidfile());
-            println!("mirror stopped (pid {pid})");
+/// Kill whatever is listening on TCP `port` (one daemon owns both its TCP and udp/QUIC sockets, so
+/// this clears the whole process). Robust against a clobbered/stale pidfile — returns how many.
+pub(crate) fn kill_port(port: u16) -> usize {
+    let Ok(out) = Command::new("ss").args(["-ltnpH", &format!("sport = :{port}")]).output() else {
+        return 0;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut killed = 0;
+    for seg in text.split("pid=").skip(1) {
+        let pid: String = seg.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if !pid.is_empty() {
+            let _ = Command::new("kill").arg(&pid).status();
+            killed += 1;
         }
-        Err(_) => println!("no mirror running"),
     }
+    killed
+}
+
+fn stop(port: u16) -> Result<()> {
+    // best-effort pidfile, then anything still bound to the port (the reliable path)
+    if let Ok(pid) = std::fs::read_to_string(pidfile()) {
+        let _ = Command::new("kill").arg(pid.trim()).status();
+    }
+    let _ = std::fs::remove_file(pidfile());
+    let n = kill_port(port);
+    println!("mirror stopped ({n} listener(s) on :{port})");
     Ok(())
 }
 
 pub fn run(args: &[String]) -> Result<()> {
-    if args.iter().any(|a| a == "--stop") {
-        return stop();
-    }
     let mut window: Option<String> = None;
     let mut port: u16 = 9123;
     let mut bind = "127.0.0.1".to_string();
+    let mut do_stop = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--stop" => do_stop = true,
             "--window" | "-w" => {
                 window = args.get(i + 1).cloned();
                 i += 1;
@@ -71,11 +91,24 @@ pub fn run(args: &[String]) -> Result<()> {
         }
         i += 1;
     }
+    if do_stop {
+        return stop(port);
+    }
     let window = window.context("usage: chatons mirror --window <id> [--port <p>] [--bind <addr>]")?;
     let matchspec = format!("id:{window}");
 
-    let listener = TcpListener::bind((bind.as_str(), port))
-        .with_context(|| format!("binding {bind}:{port}"))?;
+    // bind, retrying briefly so a just-killed predecessor has time to release the port
+    let mut listener = None;
+    for _ in 0..15 {
+        match TcpListener::bind((bind.as_str(), port)) {
+            Ok(l) => {
+                listener = Some(l);
+                break;
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
+    let listener = listener.with_context(|| format!("binding {bind}:{port}"))?;
     if bind != "127.0.0.1" && bind != "localhost" && bind != "::1" {
         eprintln!(
             "WARNING: bound to {bind} with no auth — anyone who can reach this port gets a live \
@@ -85,6 +118,22 @@ pub fn run(args: &[String]) -> Result<()> {
     let _ = std::fs::create_dir_all(crate::chatons_home());
     let _ = std::fs::write(pidfile(), std::process::id().to_string());
     println!("chatons mirror → http://{bind}:{port}/  (window {window})");
+
+    // WebTransport (HTTP/3 over QUIC) fast path on udp/<port+1> — additive; the browser pins the
+    // self-signed cert via the hash injected into the page, and falls back to SSE if it can't.
+    let quic_port = port.wrapping_add(1);
+    match wtransport::Identity::self_signed(["localhost", "127.0.0.1", "::1", bind.as_str()]) {
+        Ok(identity) => {
+            let hash = identity.certificate_chain().as_slice()[0]
+                .hash()
+                .fmt(wtransport::tls::Sha256DigestFmt::DottedHex);
+            let _ = WT_INFO.set((hash, quic_port));
+            let (b, ms) = (bind.clone(), matchspec.clone());
+            std::thread::spawn(move || crate::mirror_wt::serve(quic_port, b, identity, ms));
+            println!("  WebTransport on udp/{quic_port}");
+        }
+        Err(e) => eprintln!("  WebTransport disabled (cert: {e}); SSE only"),
+    }
 
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
@@ -162,35 +211,65 @@ fn handle(mut stream: TcpStream, matchspec: &str) -> Result<()> {
 
 /// SSE: poll the screen over a persistent kitty socket, send only changed rows, poll fast while
 /// active and back off when idle.
+/// Produces successive screen frames from the kitty socket — polls, SGR-normalises, row-diffs, and
+/// tracks idle for adaptive pacing. Shared by the SSE (`stream_loop`) and WebTransport transports
+/// so "what's on screen" has one implementation and two wire formats.
+pub(crate) struct FrameSource {
+    conn: Option<KittyConn>,
+    prev: Vec<Vec<u8>>,
+    first: bool,
+    idle: u32,
+}
+
+impl FrameSource {
+    pub(crate) fn new() -> Self {
+        Self { conn: None, prev: Vec::new(), first: true, idle: 0 }
+    }
+
+    /// Poll once: the bytes to write to the client terminal if the screen changed (a full repaint
+    /// on the first call / after a reconnect, a row-diff otherwise), else `None`.
+    pub(crate) fn poll(&mut self, matchspec: &str) -> Option<Vec<u8>> {
+        let body = sgr_to_legacy(&get_screen(&mut self.conn, matchspec));
+        if body.is_empty() {
+            return None;
+        }
+        let cur: Vec<Vec<u8>> = body.split(|&b| b == b'\n').map(<[u8]>::to_vec).collect();
+        if self.first || cur != self.prev {
+            let payload = frame_diff(&self.prev, &cur, self.first);
+            self.prev = cur;
+            self.first = false;
+            self.idle = 0;
+            Some(payload)
+        } else {
+            self.idle = self.idle.saturating_add(1);
+            None
+        }
+    }
+
+    /// Adaptive poll delay: ~30fps while active, easing to ~5fps when idle.
+    pub(crate) fn delay_ms(&self) -> u64 {
+        if self.idle < 15 { 33 } else { 200 }
+    }
+}
+
 fn stream_loop(stream: &mut TcpStream, matchspec: &str) -> Result<()> {
     write!(
         stream,
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
     )?;
-    let mut conn: Option<KittyConn> = None;
-    let mut prev: Vec<Vec<u8>> = Vec::new();
-    let mut first = true;
-    let mut idle = 0u32;
+    let mut src = FrameSource::new();
     loop {
-        let body = sgr_to_legacy(&get_screen(&mut conn, matchspec));
-        if !body.is_empty() {
-            let cur: Vec<Vec<u8>> = body.split(|&b| b == b'\n').map(<[u8]>::to_vec).collect();
-            if first || cur != prev {
-                let payload = frame_diff(&prev, &cur, first);
+        match src.poll(matchspec) {
+            Some(payload) => {
                 write!(stream, "data: {}\r\n\r\n", STANDARD.encode(&payload))?;
                 stream.flush()?;
-                prev = cur;
-                first = false;
-                idle = 0;
-            } else {
-                idle = idle.saturating_add(1);
+            }
+            None => {
                 stream.write_all(b": ping\r\n\r\n")?;
                 stream.flush()?;
             }
         }
-        // ~30fps for ~0.5s after the last change, then ease off to ~5fps while idle
-        let ms = if idle < 15 { 33 } else { 200 };
-        std::thread::sleep(Duration::from_millis(ms));
+        std::thread::sleep(Duration::from_millis(src.delay_ms()));
     }
 }
 
@@ -264,7 +343,7 @@ fn get_screen(conn: &mut Option<KittyConn>, matchspec: &str) -> Vec<u8> {
     capture_spawn(matchspec)
 }
 
-fn send_input(matchspec: &str, bytes: &[u8]) {
+pub(crate) fn send_input(matchspec: &str, bytes: &[u8]) {
     if let Some(mut c) = KittyConn::connect() {
         if c.send_text(matchspec, bytes).is_some() {
             return;
@@ -453,9 +532,12 @@ fn font_family() -> String {
 fn page() -> String {
     let c = kitty_colors();
     let bg = c.get("background").cloned().unwrap_or_else(|| "#1e1e1e".into());
+    let (wt_hash, wt_port) = WT_INFO.get().cloned().unwrap_or_default(); // ("", 0) ⇒ SSE only
     PAGE.replace("__FONT__", &font_family())
         .replace("__THEME__", &theme_json(&c))
         .replace("__BG__", &bg)
+        .replace("__WT_HASH__", &wt_hash)
+        .replace("__WT_PORT__", &wt_port.to_string())
 }
 
 // Self-contained page (r##".."## so inner double-quotes are fine). xterm.js does the emulation;
@@ -482,10 +564,37 @@ const PAGE: &str = r##"<!doctype html>
  function fit(){const w=host.offsetWidth,h=host.offsetHeight;if(!w||!h)return;
    host.style.transform='scale('+Math.min(innerWidth/w,innerHeight/h)+')';}
  fetch('/size').then(r=>r.json()).then(s=>{term.resize(s.cols,s.rows);fit();}).catch(()=>{});
- const es=new EventSource('/stream');
- es.onmessage=e=>{term.write(Uint8Array.from(atob(e.data),c=>c.charCodeAt(0)));fit();};
- es.onerror=()=>{bar.textContent='chatons mirror · disconnected'};
- term.onData(d=>fetch('/key',{method:'POST',body:d}));
+ // input goes through an indirection so the active transport can swap it
+ let sendInput=d=>fetch('/key',{method:'POST',body:d});
+ term.onData(d=>sendInput(d));
+ function startSSE(){
+   const es=new EventSource('/stream');
+   es.onmessage=e=>{term.write(Uint8Array.from(atob(e.data),c=>c.charCodeAt(0)));fit();};
+   es.onerror=()=>{bar.textContent='chatons mirror · disconnected'};
+ }
+ async function startWT(){
+   const hash=Uint8Array.from("__WT_HASH__".split(':').map(h=>parseInt(h,16)));
+   const wt=new WebTransport('https://'+location.hostname+':'+__WT_PORT__+'/mirror',
+     {serverCertificateHashes:[{algorithm:'sha-256',value:hash}]});
+   await wt.ready;
+   bar.textContent='chatons mirror · live · quic';
+   const w=(await wt.createUnidirectionalStream()).getWriter();
+   sendInput=d=>{const b=new TextEncoder().encode(d);const h=new Uint8Array(4);
+     new DataView(h.buffer).setUint32(0,b.length);w.write(h);w.write(b);};
+   const reader=wt.incomingUnidirectionalStreams.getReader();
+   const fr=(await reader.read()).value.getReader();
+   let buf=new Uint8Array(0);
+   for(;;){const {value,done}=await fr.read();if(done)break;
+     const nb=new Uint8Array(buf.length+value.length);nb.set(buf);nb.set(value,buf.length);buf=nb;
+     for(;;){if(buf.length<4)break;
+       const n=new DataView(buf.buffer,buf.byteOffset,4).getUint32(0);
+       if(buf.length<4+n)break;
+       term.write(buf.slice(4,4+n));fit();buf=buf.subarray(4+n);}
+   }
+ }
+ if("__WT_HASH__"){startWT().catch(e=>{console.warn('WebTransport failed → SSE',e);
+   bar.textContent='chatons mirror · live · sse';startSSE();});}
+ else{startSSE();}
  addEventListener('resize',fit);
 </script>
 </body></html>"##;
