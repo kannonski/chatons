@@ -36,6 +36,11 @@ interface host {
     exchange-rates: func() -> list<rate>;
     // the visible text of the pane the chaton was opened from — for content-aware chatons
     source-text: func() -> string;
+    // the kitty window id of that source pane (e.g. "153"), or "" if none — for `chatons mirror`
+    source-window: func() -> string;
+    // spawn the `chatons mirror` daemon for a window (detached, inherits the kitty socket env so
+    // it can reach `kitty @`); returns the local URL it serves on.
+    start-mirror: func(window: string, port: u32) -> string;
     // installed chatons (for the launcher): name + icon
     list-chatons: func() -> list<chaton-info>;
 }

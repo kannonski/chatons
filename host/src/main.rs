@@ -26,6 +26,8 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 
 wasmtime::component::bindgen!({ world: "chaton", path: "../wit" });
 
+mod mirror;
+
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 // Components built for wasm32-wasip2 import WASI (std uses it), so the host must provide it.
@@ -102,6 +104,25 @@ impl chatons::plugin::host::Host for State {
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
             .unwrap_or_default()
+    }
+
+    // The id of that source pane as a bare string ("153"), or "" if none could be resolved.
+    fn source_window(&mut self) -> String {
+        source_window_id().map(|id| id.to_string()).unwrap_or_default()
+    }
+
+    // Spawn `chatons mirror` for a window. We launch it from *here* (the host runs in a real
+    // kitty window, so it has KITTY_LISTEN_ON) rather than via `kitty @ launch`, whose detached
+    // children don't get the socket env — and `setsid` puts it in its own session so it keeps
+    // serving after this overlay closes.
+    fn start_mirror(&mut self, window: String, port: u32) -> String {
+        let _ = Command::new("setsid")
+            .args(["chatons", "mirror", "--window", &window, "--port", &port.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        format!("http://127.0.0.1:{port}")
     }
 
     // Installed chatons (the *.wasm in the home, minus the launcher), each with its manifest
@@ -199,6 +220,7 @@ fn main() -> Result<()> {
         Some("list") => cmd_list(),
         Some("keys") => cmd_keys(),
         Some("rates") => cmd_rates(),
+        Some("mirror") => mirror::run(&args[1..]),
         Some("run") => {
             let target = args.get(1).context("usage: chatons run <name|path.wasm>")?;
             run_named(target)
@@ -207,7 +229,7 @@ fn main() -> Result<()> {
         Some(target) => run_named(target),
         None => {
             eprintln!(
-                "chatons — a WASM plugin host for kitty\n\nusage:\n  chatons run <name>   run a chaton from ~/.config/chatons\n  chatons list         list installed chatons\n  chatons keys         print kitty keybindings for enabled chatons"
+                "chatons — a WASM plugin host for kitty\n\nusage:\n  chatons run <name>            run a chaton from ~/.config/chatons\n  chatons list                  list installed chatons\n  chatons keys                  print kitty keybindings for enabled chatons\n  chatons mirror --window <id>  serve a live view of a kitty window in the local browser"
             );
             std::process::exit(2);
         }
@@ -322,34 +344,37 @@ fn run_named(target: &str) -> Result<()> {
 /// is NOT this process and NOT a chaton overlay (so it sees through launcher/act chrome).
 /// Falls back to `recent:1`.
 fn source_window_match() -> String {
-    let pick = || -> Option<u32> {
-        let out = Command::new("kitty").args(["@", "ls"]).output().ok()?.stdout;
-        let v: serde_json::Value = serde_json::from_slice(&out).ok()?;
-        let self_id = std::env::var("KITTY_WINDOW_ID").unwrap_or_default();
-        let mut best: Option<(f64, u32)> = None;
-        for ow in v.as_array().into_iter().flatten() {
-            if !ow["is_focused"].as_bool().unwrap_or(false) {
+    source_window_id().map_or_else(|| "recent:1".to_string(), |id| format!("id:{id}"))
+}
+
+/// The id of the source pane: the most-recently-focused window in the active tab that is NOT
+/// this process and NOT a chaton overlay (so it sees through launcher/act/mirror chrome).
+fn source_window_id() -> Option<u32> {
+    let out = Command::new("kitty").args(["@", "ls"]).output().ok()?.stdout;
+    let v: serde_json::Value = serde_json::from_slice(&out).ok()?;
+    let self_id = std::env::var("KITTY_WINDOW_ID").unwrap_or_default();
+    let mut best: Option<(f64, u32)> = None;
+    for ow in v.as_array().into_iter().flatten() {
+        if !ow["is_focused"].as_bool().unwrap_or(false) {
+            continue;
+        }
+        for tab in ow["tabs"].as_array().into_iter().flatten() {
+            if !tab["is_active"].as_bool().unwrap_or(false) {
                 continue;
             }
-            for tab in ow["tabs"].as_array().into_iter().flatten() {
-                if !tab["is_active"].as_bool().unwrap_or(false) {
-                    continue;
+            for w in tab["windows"].as_array().into_iter().flatten() {
+                let id = w["id"].as_u64().unwrap_or(0);
+                if id.to_string() == self_id || w["user_vars"]["chaton"].as_str().is_some() {
+                    continue; // skip self and any chaton overlay
                 }
-                for w in tab["windows"].as_array().into_iter().flatten() {
-                    let id = w["id"].as_u64().unwrap_or(0);
-                    if id.to_string() == self_id || w["user_vars"]["chaton"].as_str().is_some() {
-                        continue; // skip self and any chaton overlay
-                    }
-                    let lf = w["last_focused_at"].as_f64().unwrap_or(0.0);
-                    if best.is_none_or(|(b, _)| lf > b) {
-                        best = Some((lf, id as u32));
-                    }
+                let lf = w["last_focused_at"].as_f64().unwrap_or(0.0);
+                if best.is_none_or(|(b, _)| lf > b) {
+                    best = Some((lf, id as u32));
                 }
             }
         }
-        best.map(|(_, id)| id)
-    };
-    pick().map_or_else(|| "recent:1".to_string(), |id| format!("id:{id}"))
+    }
+    best.map(|(_, id)| id)
 }
 
 /// The id of another overlay tagged `chaton=<name>` in the focused OS window's active tab,
