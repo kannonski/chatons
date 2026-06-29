@@ -29,9 +29,6 @@ interface host {
 
     render: func(text: string);
     kitty: func(args: string) -> s32;
-    // like kitty(), but returns the command's stdout (trimmed) — e.g. `launch` prints the new
-    // window id, which the mirror's "new stream tab" needs
-    kitty-capture: func(args: string) -> string;
     show-image: func(path: string) -> s32;
     write-file: func(path: string, data: string) -> s32;
     read-file: func(path: string) -> option<string>;
@@ -39,11 +36,6 @@ interface host {
     exchange-rates: func() -> list<rate>;
     // the visible text of the pane the chaton was opened from — for content-aware chatons
     source-text: func() -> string;
-    // the kitty window id of that source pane (e.g. "153"), or "" if none — for `chatons mirror`
-    source-window: func() -> string;
-    // spawn the `chatons mirror` daemon for a window (detached, inherits the kitty socket env so
-    // it can reach `kitty @`); returns the local URL it serves on.
-    start-mirror: func(window: string, port: u32) -> string;
     // installed chatons (for the launcher): name + icon
     list-chatons: func() -> list<chaton-info>;
 }

@@ -26,10 +26,6 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 
 wasmtime::component::bindgen!({ world: "chaton", path: "../wit" });
 
-mod mirror;
-mod mirror_p2p;
-mod mirror_wt;
-
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 // Components built for wasm32-wasip2 import WASI (std uses it), so the host must provide it.
@@ -75,19 +71,6 @@ impl chatons::plugin::host::Host for State {
         }
     }
 
-    // Like `kitty`, but returns stdout (trimmed). `kitty @ launch` prints the new window id, which
-    // the mirror's "new stream tab" mode needs to point the daemon at the freshly created tab.
-    fn kitty_capture(&mut self, args: String) -> String {
-        let parts: Vec<&str> = args.split_whitespace().collect();
-        Command::new("kitty")
-            .arg("@")
-            .args(&parts)
-            .stderr(Stdio::null())
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default()
-    }
-
     fn show_image(&mut self, path: String) -> i32 {
         // kitty opens the file itself (its cwd ≠ ours), so send an absolute path.
         let abs = std::fs::canonicalize(&path)
@@ -119,28 +102,6 @@ impl chatons::plugin::host::Host for State {
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
             .unwrap_or_default()
-    }
-
-    // The id of that source pane as a bare string ("153"), or "" if none could be resolved.
-    fn source_window(&mut self) -> String {
-        source_window_id().map(|id| id.to_string()).unwrap_or_default()
-    }
-
-    // Spawn `chatons mirror` for a window. We launch it from *here* (the host runs in a real
-    // kitty window, so it has KITTY_LISTEN_ON) rather than via `kitty @ launch`, whose detached
-    // children don't get the socket env — and `setsid` puts it in its own session so it keeps
-    // serving after this overlay closes.
-    fn start_mirror(&mut self, window: String, port: u32) -> String {
-        // clear any stale/previous daemon squatting the port so a relaunch always wins (a single
-        // shared port can't reliably be stopped by pidfile alone — see the zombie-daemon lesson)
-        crate::mirror::kill_port(port as u16);
-        let _ = Command::new("setsid")
-            .args(["chatons", "mirror", "--window", &window, "--port", &port.to_string()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        format!("http://127.0.0.1:{port}")
     }
 
     // Installed chatons (the *.wasm in the home, minus the launcher), each with its manifest
@@ -238,8 +199,6 @@ fn main() -> Result<()> {
         Some("list") => cmd_list(),
         Some("keys") => cmd_keys(),
         Some("rates") => cmd_rates(),
-        Some("mirror") => mirror::run(&args[1..]),
-        Some("mirror-open") => mirror_p2p::open(args.get(1)),
         Some("run") => {
             let target = args.get(1).context("usage: chatons run <name|path.wasm>")?;
             run_named(target)
@@ -248,7 +207,7 @@ fn main() -> Result<()> {
         Some(target) => run_named(target),
         None => {
             eprintln!(
-                "chatons — a WASM plugin host for kitty\n\nusage:\n  chatons run <name>            run a chaton from ~/.config/chatons\n  chatons list                  list installed chatons\n  chatons keys                  print kitty keybindings for enabled chatons\n  chatons mirror --window <id>  serve a live view of a kitty window in the local browser\n  chatons mirror … --p2p        also expose it over iroh P2P (prints a ticket)\n  chatons mirror-open <ticket>  dial a P2P ticket and render the remote terminal here"
+                "chatons — a WASM plugin host for kitty\n\nusage:\n  chatons run <name>   run a chaton from ~/.config/chatons\n  chatons list         list installed chatons\n  chatons keys         print kitty keybindings for enabled chatons"
             );
             std::process::exit(2);
         }
